@@ -33,6 +33,8 @@ namespace GraphicsApp
         }
 
         bool isFocusActionDrawing = true; // a flag
+        private bool isDragging = false;
+        private Point lastMousePosition;
         ShapeType? selectedShapeType = null;
 
         DrawShape selectedShape;
@@ -339,6 +341,8 @@ namespace GraphicsApp
                 var shape = lstObject[i];
                 if (shape.BoundingRect.Contains(e.Location))
                 {
+                    this.isDragging = true;
+                    this.lastMousePosition = e.Location;
                     this.selectedShape = shape;
                     panelCanvas.Refresh(); // refresh canvas with selected shape
                     return;
@@ -346,7 +350,6 @@ namespace GraphicsApp
             }
 
             // 2. if click empty then implement draw function
-
             if (this.selectedShapeType == null)
             {
                 MessageBox.Show(
@@ -393,6 +396,18 @@ namespace GraphicsApp
 
         private void panelCanvas_MouseMove(object sender, MouseEventArgs e)
         {
+            if (!this.isFocusActionDrawing && this.isDragging && this.selectedShape != null)
+            {
+                int dx = e.X - lastMousePosition.X;
+                int dy = e.Y - lastMousePosition.Y;
+
+                selectedShape.p1 = new Point(selectedShape.p1.X + dx, selectedShape.p1.Y + dy);
+                selectedShape.p2 = new Point(selectedShape.p2.X + dx, selectedShape.p2.Y + dy);
+
+                lastMousePosition = e.Location;
+                panelCanvas.Refresh();
+            }
+
             if (this.isFocusActionDrawing && this.selectedShapeType != null && this.lstObject.Count > 0)
             {
                 DrawShape currentShape = this.lstObject[lstObject.Count - 1];
@@ -407,6 +422,10 @@ namespace GraphicsApp
                 this.isFocusActionDrawing = false;
                 this.lstObject[this.lstObject.Count - 1].p2 = e.Location;
                 this.panelCanvas.Refresh();
+            }
+            if (!this.isFocusActionDrawing && this.isDragging)
+            {
+                this.isDragging = false;
             }
         }
 
