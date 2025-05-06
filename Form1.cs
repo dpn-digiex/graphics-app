@@ -43,7 +43,6 @@ namespace GraphicsApp
 
         ShapeType? selectedShapeType = null;
 
-        DrawShape selectedShape;
         List<DrawShape> lstObject = new List<DrawShape>();
         List<DrawShape> selectedShapesGroup = new List<DrawShape>();
 
@@ -240,7 +239,7 @@ namespace GraphicsApp
                 List<Point> points = new List<Point>();
                 for (int i = 0; i < sides; i++)
                 {
-                    double angleDeg = 360.0 / sides * i - 90; // đỉnh đầu hướng lên
+                    double angleDeg = 360.0 / sides * i - 90;
                     double angleRad = angleDeg * Math.PI / 180.0;
                     int x = center.X + (int)(radius * Math.Cos(angleRad));
                     int y = center.Y + (int)(radius * Math.Sin(angleRad));
@@ -249,6 +248,34 @@ namespace GraphicsApp
                 return points;
             }
 
+        }
+
+        public class GroupShape : DrawShape
+        {
+            public List<DrawShape> Children = new List<DrawShape>();
+            public override Rectangle BoundingRect
+            {
+                get
+                {
+                    if (Children.Count == 0) return Rectangle.Empty;
+                    int minX = Children.Min(s => s.BoundingRect.Left);
+                    int minY = Children.Min(s => s.BoundingRect.Top);
+                    int maxX = Children.Max(s => s.BoundingRect.Right);
+                    int maxY = Children.Max(s => s.BoundingRect.Bottom);
+                    return Rectangle.FromLTRB(minX, minY, maxX, maxY);
+                }
+            }
+
+            public override void Draw(Graphics g, Pen p)
+            {
+                foreach (var shape in Children)
+                {
+                    using (Pen pen = new Pen(shape.color, shape.width))
+                    {
+                        shape.Draw(g, pen);
+                    }
+                }
+            }
         }
 
         public formMain()
@@ -265,7 +292,50 @@ namespace GraphicsApp
         }
         private void formMain_KeyDown(object sender, KeyEventArgs e)
         {
-            
+            // delete or Backspace to delete all seleted objs
+            if ((e.KeyCode == Keys.Delete || e.KeyCode == Keys.Back) && selectedShapesGroup.Count > 0)
+            {
+                foreach (var shape in selectedShapesGroup)
+                {
+                    lstObject.Remove(shape);
+                }
+                selectedShapesGroup.Clear();
+                panelCanvas.Refresh();
+            }
+            // Ctrl + G to group
+            if (e.Control && e.KeyCode == Keys.G && !e.Shift && selectedShapesGroup.Count > 1)
+            {
+                GroupShape group = new GroupShape();
+                group.Children.AddRange(selectedShapesGroup);
+
+                foreach (var shape in selectedShapesGroup)
+                {
+                    lstObject.Remove(shape);
+                }
+                lstObject.Add(group);
+
+                selectedShapesGroup.Clear();
+                selectedShapesGroup.Add(group);
+                panelCanvas.Refresh();
+            }
+
+            // Ctrl + Shift + G to ungroup
+            if (e.Control && e.Shift && e.KeyCode == Keys.G)
+            {
+                var groupsToUngroup = selectedShapesGroup.OfType<GroupShape>().ToList();
+
+                foreach (var group in groupsToUngroup)
+                {
+                    foreach (var child in group.Children)
+                    {
+                        lstObject.Add(child);
+                    }
+                    lstObject.Remove(group);
+                    selectedShapesGroup.Remove(group);
+                }
+
+                panelCanvas.Refresh();
+            }
         }
 
         private void InitializeUI()
@@ -303,27 +373,31 @@ namespace GraphicsApp
                     shape.Draw(e.Graphics, pen);
                 }
 
-                // Bounding box
-                var rect = shape.BoundingRect;
-                if (shape == selectedShape)
+                if (selectedShapesGroup.Contains(shape))
                 {
-                    using (Pen redPen = new Pen(Color.Red, 1))
+                    Rectangle rect = shape.BoundingRect;
+                    using (Pen redPen = new Pen(Color.Red, 1) { DashStyle = System.Drawing.Drawing2D.DashStyle.Dash })
                     {
-                        redPen.DashStyle = System.Drawing.Drawing2D.DashStyle.Dash;
                         e.Graphics.DrawRectangle(redPen, rect);
                     }
 
-                    // Draw 4 corner anchors
                     DrawAnchor(e.Graphics, rect.Left, rect.Top, anchorSize);
                     DrawAnchor(e.Graphics, rect.Right, rect.Top, anchorSize);
                     DrawAnchor(e.Graphics, rect.Left, rect.Bottom, anchorSize);
                     DrawAnchor(e.Graphics, rect.Right, rect.Bottom, anchorSize);
                 }
-                else
+            }
+
+            // draw group bounding rect
+            if (selectedShapesGroup.Count > 1)
+            {
+                var bounds = GetGroupBoundingRect();
+                using (Pen groupPen = new Pen(Color.DarkOrange, 2) { DashStyle = System.Drawing.Drawing2D.DashStyle.DashDot })
                 {
-                    // Optional: transparent border for unselected (no need to draw anything)
+                    e.Graphics.DrawRectangle(groupPen, bounds);
                 }
             }
+
         }
 
         private void DrawAnchor(Graphics g, int x, int y, int size)
@@ -348,14 +422,25 @@ namespace GraphicsApp
             if (bottomRight.Contains(mouse)) return "BottomRight";
             return null;
         }
+
+        private Rectangle GetGroupBoundingRect()
+        {
+            if (selectedShapesGroup.Count == 0) return Rectangle.Empty;
+            int minX = selectedShapesGroup.Min(s => s.BoundingRect.Left);
+            int minY = selectedShapesGroup.Min(s => s.BoundingRect.Top);
+            int maxX = selectedShapesGroup.Max(s => s.BoundingRect.Right);
+            int maxY = selectedShapesGroup.Max(s => s.BoundingRect.Bottom);
+            return Rectangle.FromLTRB(minX, minY, maxX, maxY);
+        }
         private void panelCanvas_MouseDown(object sender, MouseEventArgs e)
         {
             this.isFocusActionDrawing = false;
 
             // 1. check if has selected shape check the hit position is anchor or not
-            if (this.selectedShape != null)
+            if (selectedShapesGroup.Count > 0)
             {
-                string anchorHit = HitTestAnchor(e.Location, this.selectedShape.BoundingRect);
+                Rectangle groupRect = GetGroupBoundingRect();
+                string anchorHit = HitTestAnchor(e.Location, groupRect);
                 if (anchorHit != null)
                 {
                     this.isResizing = true;
@@ -365,17 +450,34 @@ namespace GraphicsApp
                 }
             }
 
-            // 2. check if the position clicked by cursor included of shape
+            bool isCtrlDown = (ModifierKeys & Keys.Control) == Keys.Control;
+            // 2. check if the position clicked by cursor included of shape's position
             // -> active bounding box of selected shape
             for (int i = lstObject.Count - 1; i >= 0; i--)
             {
                 var shape = lstObject[i];
                 if (shape.BoundingRect.Contains(e.Location))
                 {
+                    if (isCtrlDown)
+                    {
+                        if (selectedShapesGroup.Contains(shape))
+                        {
+                            selectedShapesGroup.Remove(shape);
+                        }
+                        else
+                        {
+                            selectedShapesGroup.Add(shape);
+                        }
+                    }
+                    else
+                    {
+                        selectedShapesGroup.Clear();
+                        selectedShapesGroup.Add(shape);
+                    }
+
                     this.isDragging = true;
                     this.lastMousePosition = e.Location;
-                    this.selectedShape = shape;
-                    panelCanvas.Refresh(); // refresh canvas with selected shape
+                    panelCanvas.Refresh();
                     return;
                 }
             }
@@ -428,8 +530,9 @@ namespace GraphicsApp
         private void panelCanvas_MouseMove(object sender, MouseEventArgs e)
         {
             // zoom in/zoom out shape by drag anchor
-            if (!this.isFocusActionDrawing && this.isResizing && this.selectedShape != null && this.currentAnchor != null)
+            if (!this.isFocusActionDrawing && this.isResizing && this.selectedShapesGroup.Count == 1 && this.currentAnchor != null)
             {
+                DrawShape selectedShape = this.selectedShapesGroup[0]; 
                 Point delta = new Point(e.X - lastMousePosition.X, e.Y - lastMousePosition.Y);
                 lastMousePosition = e.Location;
 
@@ -462,8 +565,9 @@ namespace GraphicsApp
             }
 
             // drag/drop selected shape
-            if (!this.isFocusActionDrawing && this.isDragging && this.selectedShape != null)
+            if (!this.isFocusActionDrawing && this.isDragging && this.selectedShapesGroup.Count == 1)
             {
+                DrawShape selectedShape = this.selectedShapesGroup[0];
                 int dx = e.X - lastMousePosition.X;
                 int dy = e.Y - lastMousePosition.Y;
 
@@ -575,7 +679,7 @@ namespace GraphicsApp
         private void btnRemoveShapes_Click(object sender, EventArgs e)
         {
             this.lstObject.Clear();
-            this.selectedShape = null;
+            this.selectedShapesGroup.Clear();
             panelCanvas.Refresh();
         }
         
