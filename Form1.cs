@@ -18,7 +18,9 @@ namespace GraphicsApp
 
         Color selectedColor;
         int widthPen;
+        int anchorSize = 10;
         private Dictionary<string, Color> colorMap;
+        
         public enum ShapeType
         {
             Line,
@@ -32,9 +34,13 @@ namespace GraphicsApp
             Polygon
         }
 
-        bool isFocusActionDrawing = true; // a flag
+        // events state management of canvas
+        bool isFocusActionDrawing = true;
         private bool isDragging = false;
         private Point lastMousePosition;
+        private bool isResizing = false;
+        private string currentAnchor = null;
+
         ShapeType? selectedShapeType = null;
 
         DrawShape selectedShape;
@@ -308,7 +314,6 @@ namespace GraphicsApp
                     }
 
                     // Draw 4 corner anchors
-                    int anchorSize = 6;
                     DrawAnchor(e.Graphics, rect.Left, rect.Top, anchorSize);
                     DrawAnchor(e.Graphics, rect.Right, rect.Top, anchorSize);
                     DrawAnchor(e.Graphics, rect.Left, rect.Bottom, anchorSize);
@@ -330,11 +335,37 @@ namespace GraphicsApp
             }
         }
 
+        private string HitTestAnchor(Point mouse, Rectangle rect)
+        {
+            Rectangle topLeft = new Rectangle(rect.Left - anchorSize / 2, rect.Top - anchorSize / 2, anchorSize, anchorSize);
+            Rectangle topRight = new Rectangle(rect.Right - anchorSize / 2, rect.Top - anchorSize / 2, anchorSize, anchorSize);
+            Rectangle bottomLeft = new Rectangle(rect.Left - anchorSize / 2, rect.Bottom - anchorSize / 2, anchorSize, anchorSize);
+            Rectangle bottomRight = new Rectangle(rect.Right - anchorSize / 2, rect.Bottom - anchorSize / 2, anchorSize, anchorSize);
+
+            if (topLeft.Contains(mouse)) return "TopLeft";
+            if (topRight.Contains(mouse)) return "TopRight";
+            if (bottomLeft.Contains(mouse)) return "BottomLeft";
+            if (bottomRight.Contains(mouse)) return "BottomRight";
+            return null;
+        }
         private void panelCanvas_MouseDown(object sender, MouseEventArgs e)
         {
             this.isFocusActionDrawing = false;
 
-            // 1. check if the position clicked by cursor included of shape
+            // 1. check if has selected shape check the hit position is anchor or not
+            if (this.selectedShape != null)
+            {
+                string anchorHit = HitTestAnchor(e.Location, this.selectedShape.BoundingRect);
+                if (anchorHit != null)
+                {
+                    this.isResizing = true;
+                    this.currentAnchor = anchorHit;
+                    this.lastMousePosition = e.Location;
+                    return;
+                }
+            }
+
+            // 2. check if the position clicked by cursor included of shape
             // -> active bounding box of selected shape
             for (int i = lstObject.Count - 1; i >= 0; i--)
             {
@@ -349,7 +380,7 @@ namespace GraphicsApp
                 }
             }
 
-            // 2. if click empty then implement draw function
+            // 2. check if click empty then implement draw function
             if (this.selectedShapeType == null)
             {
                 MessageBox.Show(
@@ -396,6 +427,41 @@ namespace GraphicsApp
 
         private void panelCanvas_MouseMove(object sender, MouseEventArgs e)
         {
+            // zoom in/zoom out shape by drag anchor
+            if (!this.isFocusActionDrawing && this.isResizing && this.selectedShape != null && this.currentAnchor != null)
+            {
+                Point delta = new Point(e.X - lastMousePosition.X, e.Y - lastMousePosition.Y);
+                lastMousePosition = e.Location;
+
+                Point newP1 = selectedShape.p1;
+                Point newP2 = selectedShape.p2;
+
+                switch (currentAnchor)
+                {
+                    case "TopLeft":
+                        newP1 = new Point(selectedShape.p1.X + delta.X, selectedShape.p1.Y + delta.Y);
+                        break;
+                    case "TopRight":
+                        newP2 = new Point(selectedShape.p2.X + delta.X, selectedShape.p2.Y);
+                        newP1 = new Point(selectedShape.p1.X, selectedShape.p1.Y + delta.Y);
+                        break;
+                    case "BottomLeft":
+                        newP1 = new Point(selectedShape.p1.X + delta.X, selectedShape.p1.Y);
+                        newP2 = new Point(selectedShape.p2.X, selectedShape.p2.Y + delta.Y);
+                        break;
+                    case "BottomRight":
+                        newP2 = new Point(selectedShape.p2.X + delta.X, selectedShape.p2.Y + delta.Y);
+                        break;
+                }
+
+                selectedShape.p1 = newP1;
+                selectedShape.p2 = newP2;
+
+                panelCanvas.Refresh();
+                return;
+            }
+
+            // drag/drop selected shape
             if (!this.isFocusActionDrawing && this.isDragging && this.selectedShape != null)
             {
                 int dx = e.X - lastMousePosition.X;
@@ -407,7 +473,8 @@ namespace GraphicsApp
                 lastMousePosition = e.Location;
                 panelCanvas.Refresh();
             }
-
+            
+            // drawing shape to canvas
             if (this.isFocusActionDrawing && this.selectedShapeType != null && this.lstObject.Count > 0)
             {
                 DrawShape currentShape = this.lstObject[lstObject.Count - 1];
@@ -422,6 +489,11 @@ namespace GraphicsApp
                 this.isFocusActionDrawing = false;
                 this.lstObject[this.lstObject.Count - 1].p2 = e.Location;
                 this.panelCanvas.Refresh();
+            }
+            if (!this.isFocusActionDrawing && this.isResizing)
+            {
+                this.isResizing = false;
+                this.currentAnchor = null;
             }
             if (!this.isFocusActionDrawing && this.isDragging)
             {
